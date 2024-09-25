@@ -1,0 +1,420 @@
+<html>
+<head>
+<title>main.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+main.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">os </span><span class="s0">import </span><span class="s1">truncate</span>
+<span class="s0">import </span><span class="s1">nltk</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">torch</span>
+<span class="s0">from </span><span class="s1">nltk</span><span class="s2">.</span><span class="s1">stem </span><span class="s0">import </span><span class="s1">WordNetLemmatizer</span>
+<span class="s0">from </span><span class="s1">transformers </span><span class="s0">import </span><span class="s1">BartForConditionalGeneration</span><span class="s2">, </span><span class="s1">BartTokenizer</span><span class="s2">, </span><span class="s1">DataCollatorWithPadding</span>
+<span class="s0">from </span><span class="s1">transformers </span><span class="s0">import </span><span class="s1">GPT2LMHeadModel</span><span class="s2">, </span><span class="s1">GPT2Tokenizer</span>
+<span class="s0">from </span><span class="s1">transformers </span><span class="s0">import </span><span class="s1">TextDataset</span><span class="s2">, </span><span class="s1">DataCollatorForLanguageModeling</span>
+<span class="s0">from </span><span class="s1">gtts </span><span class="s0">import </span><span class="s1">gTTS</span>
+<span class="s0">from </span><span class="s1">pygame </span><span class="s0">import </span><span class="s1">mixer  </span><span class="s3"># Load the popular external library</span>
+<span class="s0">import </span><span class="s1">requests</span>
+<span class="s0">from </span><span class="s1">bs4 </span><span class="s0">import </span><span class="s1">BeautifulSoup</span>
+<span class="s0">from </span><span class="s1">transformers </span><span class="s0">import </span><span class="s1">Trainer</span><span class="s2">, </span><span class="s1">TrainingArguments</span>
+<span class="s0">from </span><span class="s1">torch</span><span class="s2">.</span><span class="s1">utils</span><span class="s2">.</span><span class="s1">data </span><span class="s0">import </span><span class="s1">Dataset</span>
+
+
+<span class="s4">&quot;&quot;&quot; 
+This applications takes text from Wikipedia using BeautifulSoup regrading the Artificial 
+Intelligence Field. The text is then processed, and paraphrased using 
+Facebook-bart llm to create more and diverse data. The data are then combined 
+into a single text file and are fed in the GPT2 LLM for fine tuning. The response 
+is then translated to an audio file and is being played. 
+&quot;&quot;&quot;</span>
+
+
+<span class="s3"># Check if GPU is available, else use CPU</span>
+<span class="s1">device </span><span class="s2">= </span><span class="s1">torch</span><span class="s2">.</span><span class="s1">device</span><span class="s2">(</span>
+    <span class="s4">&quot;cuda&quot; </span><span class="s0">if </span><span class="s1">torch</span><span class="s2">.</span><span class="s1">cuda</span><span class="s2">.</span><span class="s1">is_available</span><span class="s2">() </span><span class="s0">else </span><span class="s4">&quot;cpu&quot;</span><span class="s2">)</span>
+<span class="s1">print</span><span class="s2">(</span><span class="s4">f'Using device </span><span class="s0">{</span><span class="s1">device</span><span class="s0">}</span><span class="s4">'</span><span class="s2">)</span>
+
+<span class="s0">class </span><span class="s1">CustomDataset</span><span class="s2">(</span><span class="s1">Dataset</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tokenizer</span><span class="s2">, </span><span class="s1">file_path</span><span class="s2">, </span><span class="s1">block_size</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">tokenizer </span><span class="s2">= </span><span class="s1">tokenizer</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">block_size </span><span class="s2">= </span><span class="s1">block_size</span>
+
+        <span class="s3"># Read the text data from the file and split into lines</span>
+        <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">file_path</span><span class="s2">, </span><span class="s4">&quot;r&quot;</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">&quot;utf-8&quot;</span><span class="s2">) </span><span class="s0">as </span><span class="s1">f</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">text </span><span class="s2">= </span><span class="s1">f</span><span class="s2">.</span><span class="s1">read</span><span class="s2">().</span><span class="s1">splitlines</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">__len__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">text</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__getitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">idx</span><span class="s2">):</span>
+        <span class="s3"># Tokenize the input text with padding and truncation</span>
+        <span class="s1">tokenized_inputs </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">tokenizer</span><span class="s2">(</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">text</span><span class="s2">[</span><span class="s1">idx</span><span class="s2">],</span>
+            <span class="s1">truncation</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+            <span class="s1">padding</span><span class="s2">=</span><span class="s4">&quot;max_length&quot;</span><span class="s2">,</span>
+            <span class="s1">max_length</span><span class="s2">=</span><span class="s5">512</span><span class="s2">,</span>
+            <span class="s1">return_tensors</span><span class="s2">=</span><span class="s4">&quot;pt&quot;</span>
+        <span class="s2">)</span>
+        <span class="s3"># Squeeze the tensors to remove batch dimension</span>
+        <span class="s1">input_ids </span><span class="s2">= </span><span class="s1">tokenized_inputs</span><span class="s2">[</span><span class="s4">&quot;input_ids&quot;</span><span class="s2">].</span><span class="s1">squeeze</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)  </span><span class="s3"># Shape: [block_size]</span>
+        <span class="s1">attention_mask </span><span class="s2">= </span><span class="s1">tokenized_inputs</span><span class="s2">[</span><span class="s4">&quot;attention_mask&quot;</span><span class="s2">].</span><span class="s1">squeeze</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)  </span><span class="s3"># Shape: [block_size]</span>
+
+        <span class="s3"># Use input_ids for labels</span>
+        <span class="s1">labels </span><span class="s2">= </span><span class="s1">input_ids</span><span class="s2">.</span><span class="s1">clone</span><span class="s2">()  </span><span class="s3"># Clone to create labels</span>
+
+        <span class="s0">return </span><span class="s2">{</span>
+            <span class="s4">&quot;input_ids&quot;</span><span class="s2">: </span><span class="s1">input_ids</span><span class="s2">,</span>
+            <span class="s4">&quot;attention_mask&quot;</span><span class="s2">: </span><span class="s1">attention_mask</span><span class="s2">,</span>
+            <span class="s4">&quot;labels&quot;</span><span class="s2">: </span><span class="s1">labels</span>
+        <span class="s2">}</span>
+
+
+<span class="s3"># Ensure necessary NLTK resources are downloaded</span>
+<span class="s1">nltk</span><span class="s2">.</span><span class="s1">download</span><span class="s2">(</span><span class="s4">'punkt'</span><span class="s2">)</span>
+<span class="s1">nltk</span><span class="s2">.</span><span class="s1">download</span><span class="s2">(</span><span class="s4">'wordnet'</span><span class="s2">)</span>
+<span class="s1">nltk</span><span class="s2">.</span><span class="s1">download</span><span class="s2">(</span><span class="s4">'omw-1.4'</span><span class="s2">)</span>
+
+<span class="s3"># Initialize the lemmatizer</span>
+<span class="s1">lemmatizer </span><span class="s2">= </span><span class="s1">WordNetLemmatizer</span><span class="s2">()</span>
+
+<span class="s3"># Load the pre-trained T5 model and tokenizer for paraphrasing</span>
+<span class="s1">model_name </span><span class="s2">= </span><span class="s4">&quot;facebook/bart-large-cnn&quot;  </span><span class="s3"># You can choose a larger model if needed</span>
+<span class="s1">tokenizer </span><span class="s2">= </span><span class="s1">BartTokenizer</span><span class="s2">.</span><span class="s1">from_pretrained</span><span class="s2">(</span><span class="s1">model_name</span><span class="s2">)</span>
+<span class="s1">paraphrase_model </span><span class="s2">= </span><span class="s1">BartForConditionalGeneration</span><span class="s2">.</span><span class="s1">from_pretrained</span><span class="s2">(</span><span class="s1">model_name</span><span class="s2">)</span>
+
+<span class="s1">model_name_gpt </span><span class="s2">= </span><span class="s4">&quot;gpt2&quot;  </span><span class="s3"># You can also choose other versions like 'gpt2-medium', etc.</span>
+<span class="s1">model_gpt </span><span class="s2">= </span><span class="s1">GPT2LMHeadModel</span><span class="s2">.</span><span class="s1">from_pretrained</span><span class="s2">(</span><span class="s1">model_name_gpt</span><span class="s2">)</span>
+<span class="s1">tokenizer_gpt </span><span class="s2">= </span><span class="s1">GPT2Tokenizer</span><span class="s2">.</span><span class="s1">from_pretrained</span><span class="s2">(</span><span class="s1">model_name_gpt</span><span class="s2">)</span>
+
+<span class="s3"># Set padding token</span>
+<span class="s0">if </span><span class="s1">tokenizer_gpt</span><span class="s2">.</span><span class="s1">pad_token </span><span class="s0">is None</span><span class="s2">:</span>
+    <span class="s1">tokenizer_gpt</span><span class="s2">.</span><span class="s1">pad_token </span><span class="s2">= </span><span class="s1">tokenizer_gpt</span><span class="s2">.</span><span class="s1">eos_token</span>
+    <span class="s1">tokenizer_gpt</span><span class="s2">.</span><span class="s1">pad_token_id </span><span class="s2">= </span><span class="s1">tokenizer_gpt</span><span class="s2">.</span><span class="s1">eos_token_id</span>
+
+<span class="s3"># Function to read the file</span>
+<span class="s0">def </span><span class="s1">read_file</span><span class="s2">(</span><span class="s1">file_path</span><span class="s2">):</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">file_path</span><span class="s2">, </span><span class="s4">'r'</span><span class="s2">) </span><span class="s0">as </span><span class="s1">file</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">file</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+    <span class="s0">except </span><span class="s1">FileNotFoundError</span><span class="s2">:</span>
+        <span class="s1">print</span><span class="s2">(</span><span class="s4">f&quot;The file '</span><span class="s0">{</span><span class="s1">file_path</span><span class="s0">}</span><span class="s4">' was not found.&quot;</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s4">&quot;&quot;</span>
+
+
+<span class="s3"># Function to tokenize text into sentences and lemmatize</span>
+<span class="s0">def </span><span class="s1">tokenize_and_lemmatize</span><span class="s2">(</span><span class="s1">text</span><span class="s2">):</span>
+    <span class="s1">sentences </span><span class="s2">= </span><span class="s1">nltk</span><span class="s2">.</span><span class="s1">sent_tokenize</span><span class="s2">(</span><span class="s1">text</span><span class="s2">)</span>
+    <span class="s1">lemmatized_sentences </span><span class="s2">= []</span>
+    <span class="s0">for </span><span class="s1">sentence </span><span class="s0">in </span><span class="s1">sentences</span><span class="s2">:</span>
+        <span class="s1">words </span><span class="s2">= </span><span class="s1">nltk</span><span class="s2">.</span><span class="s1">word_tokenize</span><span class="s2">(</span><span class="s1">sentence</span><span class="s2">)</span>
+        <span class="s1">lemmatized_sentence </span><span class="s2">= </span><span class="s4">' '</span><span class="s2">.</span><span class="s1">join</span><span class="s2">([</span><span class="s1">lemmatizer</span><span class="s2">.</span><span class="s1">lemmatize</span><span class="s2">(</span><span class="s1">word</span><span class="s2">) </span><span class="s0">for </span><span class="s1">word </span><span class="s0">in </span><span class="s1">words</span><span class="s2">])</span>
+        <span class="s1">lemmatized_sentences</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">lemmatized_sentence</span><span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s1">lemmatized_sentences</span>
+
+
+<span class="s3"># Function to prepare training data</span>
+<span class="s0">def </span><span class="s1">prepare_training_data</span><span class="s2">(</span><span class="s1">directory_path</span><span class="s2">):</span>
+    <span class="s1">sentences </span><span class="s2">= []</span>
+    <span class="s1">labels </span><span class="s2">= []</span>
+
+    <span class="s0">for </span><span class="s1">filename </span><span class="s0">in </span><span class="s1">os</span><span class="s2">.</span><span class="s1">listdir</span><span class="s2">(</span><span class="s1">directory_path</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">filename</span><span class="s2">.</span><span class="s1">endswith</span><span class="s2">(</span><span class="s4">&quot;.txt&quot;</span><span class="s2">):  </span><span class="s3"># Only process text files</span>
+            <span class="s1">file_path </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">directory_path</span><span class="s2">, </span><span class="s1">filename</span><span class="s2">)</span>
+            <span class="s1">text </span><span class="s2">= </span><span class="s1">read_file</span><span class="s2">(</span><span class="s1">file_path</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">text</span><span class="s2">:</span>
+                <span class="s1">class_name </span><span class="s2">= </span><span class="s1">filename</span><span class="s2">[:-</span><span class="s5">4</span><span class="s2">]  </span><span class="s3"># Remove '.txt' to get class name</span>
+                <span class="s1">file_sentences </span><span class="s2">= </span><span class="s1">tokenize_and_lemmatize</span><span class="s2">(</span><span class="s1">text</span><span class="s2">)</span>
+
+                <span class="s1">sentences</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">(</span><span class="s1">file_sentences</span><span class="s2">)</span>
+                <span class="s1">labels</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">([</span><span class="s1">class_name</span><span class="s2">] * </span><span class="s1">len</span><span class="s2">(</span><span class="s1">file_sentences</span><span class="s2">))</span>
+
+    <span class="s0">return </span><span class="s1">sentences</span><span class="s2">, </span><span class="s1">labels</span>
+
+
+<span class="s0">def </span><span class="s1">classify_prompt</span><span class="s2">(</span><span class="s1">predictedPrompt</span><span class="s2">):</span>
+    <span class="s0">return </span><span class="s1">predictedPrompt</span>
+
+
+<span class="s0">def </span><span class="s1">paraphrase</span><span class="s2">(</span><span class="s1">text</span><span class="s2">,</span><span class="s1">num_return_sequences</span><span class="s2">=</span><span class="s5">4</span><span class="s2">):</span>
+    <span class="s1">input_text </span><span class="s2">= </span><span class="s4">f&quot;paraphrase: </span><span class="s0">{</span><span class="s1">text</span><span class="s0">}</span><span class="s4">&quot;</span>
+    <span class="s1">input_ids </span><span class="s2">= </span><span class="s1">tokenizer</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">input_text</span><span class="s2">, </span><span class="s1">return_tensors</span><span class="s2">=</span><span class="s4">'pt'</span><span class="s2">)</span>
+
+    <span class="s1">output </span><span class="s2">= </span><span class="s1">paraphrase_model</span><span class="s2">.</span><span class="s1">generate</span><span class="s2">(</span>
+        <span class="s1">input_ids</span><span class="s2">,</span>
+        <span class="s1">max_length</span><span class="s2">=</span><span class="s5">500</span><span class="s2">,</span>
+        <span class="s1">num_return_sequences</span><span class="s2">=</span><span class="s1">num_return_sequences</span><span class="s2">,</span>
+        <span class="s1">do_sample</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,  </span><span class="s3"># Enable sampling for diversity</span>
+        <span class="s1">top_k</span><span class="s2">=</span><span class="s5">50</span><span class="s2">,  </span><span class="s3"># Top-k sampling</span>
+        <span class="s1">top_p</span><span class="s2">=</span><span class="s5">0.95</span><span class="s2">,  </span><span class="s3"># Nucleus sampling</span>
+        <span class="s1">early_stopping</span><span class="s2">=</span><span class="s0">True</span>
+    <span class="s2">)</span>
+    <span class="s1">paraphrased_text </span><span class="s2">= </span><span class="s1">tokenizer</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">output</span><span class="s2">[</span><span class="s5">0</span><span class="s2">], </span><span class="s1">skip_special_tokens</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">paraphrased_text</span>
+
+
+<span class="s0">def </span><span class="s1">choose_text</span><span class="s2">(</span><span class="s1">responseType</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s1">responseType </span><span class="s2">== </span><span class="s4">'information'</span><span class="s2">:</span>
+        <span class="s1">response </span><span class="s2">=</span><span class="s4">&quot;My name is Michael Kefalakis. I am from Rhodes, but currently I live in Athens. I am 25 years old. I have studied Computer Science and Biomedical Informatics Bsc, GIS in MSc, I am a detail oriented developer with passion for machine learning&quot;</span>
+    <span class="s0">if </span><span class="s1">responseType </span><span class="s2">== </span><span class="s4">'Education'</span><span class="s2">:</span>
+        <span class="s1">response </span><span class="s2">= </span><span class="s4">&quot;I studied Biomedical Informatics and Computer Science at the University of Thessaly, and Geospatial Information Systems in the Hellenic Army Academy&quot;</span>
+    <span class="s0">if </span><span class="s1">responseType </span><span class="s2">== </span><span class="s4">'Athens Stay'</span><span class="s2">:</span>
+        <span class="s1">response </span><span class="s2">= </span><span class="s4">&quot;I live in Agios Antwnios, Peristeri&quot;</span>
+    <span class="s0">if </span><span class="s1">responseType </span><span class="s2">== </span><span class="s4">'Portofolio'</span><span class="s2">:</span>
+        <span class="s1">response </span><span class="s2">= </span><span class="s4">'I will gladly provide you with the links of my portofolio!'</span>
+    <span class="s0">if </span><span class="s1">responseType </span><span class="s2">== </span><span class="s4">'Summary'</span><span class="s2">:</span>
+        <span class="s1">response </span><span class="s2">= </span><span class="s4">&quot;Detail-oriented software engineer with a strong foundation in backend development and a passion for artificial intelligence and machine learning. Over a year of experience in backend development, complemented by a master's thesis focused on Synthetic Data Generation using Remote Sensing and GIS Data Processing for Visualization and Computer Vision Applications (link in portofolio section).  Part of my Thesis was presented in MCSI 2024 and was accepted for publication. Additionally, my portofolio includes time series forecasting for weather prediction (link in portofolio section), demonstrating proficiency in data science, machine learning algorithms, and model deployment. Adept at translating complex data into actionable insights and leveraging cutting-edge technologies to solve real-world problems.&quot;</span>
+    <span class="s0">if </span><span class="s1">responseType </span><span class="s2">== </span><span class="s4">'Work Experience'</span><span class="s2">:</span>
+        <span class="s1">response </span><span class="s2">= </span><span class="s4">'I have worked as a Junior Back End Developer for Netmechanics LLC in Heraclion, Crete'</span>
+    <span class="s0">if </span><span class="s1">responseType </span><span class="s2">== </span><span class="s4">'Age'</span><span class="s2">:</span>
+        <span class="s1">response </span><span class="s2">= </span><span class="s4">'I am 25 years old'</span>
+    <span class="s0">return </span><span class="s1">response</span>
+
+
+<span class="s0">def </span><span class="s1">text_to_audio</span><span class="s2">(</span><span class="s1">text</span><span class="s2">, </span><span class="s1">output_audio_file</span><span class="s2">, </span><span class="s1">file_count</span><span class="s2">):</span>
+    <span class="s3"># If mixer is on, terminate</span>
+    <span class="s0">if </span><span class="s1">mixer</span><span class="s2">.</span><span class="s1">get_init</span><span class="s2">():</span>
+        <span class="s1">mixer</span><span class="s2">.</span><span class="s1">stop</span><span class="s2">()</span>
+
+    <span class="s3"># Erase old mp3 file</span>
+    <span class="s0">if </span><span class="s1">file_count </span><span class="s2">!= </span><span class="s5">0</span><span class="s2">:</span>
+        <span class="s1">old_audio_file </span><span class="s2">= </span><span class="s4">&quot;test&quot; </span><span class="s2">+ </span><span class="s1">str</span><span class="s2">(</span><span class="s1">file_count</span><span class="s2">) + </span><span class="s4">&quot;.mp3&quot;</span>
+        <span class="s0">if </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">old_audio_file</span><span class="s2">):</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">remove</span><span class="s2">(</span><span class="s1">old_audio_file</span><span class="s2">)</span>
+
+    <span class="s3"># Create a gTTS object</span>
+    <span class="s1">tts </span><span class="s2">= </span><span class="s1">gTTS</span><span class="s2">(</span><span class="s1">text</span><span class="s2">=</span><span class="s1">text</span><span class="s2">, </span><span class="s1">lang</span><span class="s2">=</span><span class="s4">'en'</span><span class="s2">)  </span><span class="s3"># You can change 'en' to another language code if needed</span>
+
+    <span class="s3"># Save the audio file</span>
+    <span class="s1">tts</span><span class="s2">.</span><span class="s1">save</span><span class="s2">(</span><span class="s1">output_audio_file</span><span class="s2">)</span>
+    <span class="s1">print</span><span class="s2">(</span><span class="s4">f&quot;Audio saved as: </span><span class="s0">{</span><span class="s1">output_audio_file</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+    <span class="s1">mixer</span><span class="s2">.</span><span class="s1">init</span><span class="s2">()</span>
+    <span class="s1">mixer</span><span class="s2">.</span><span class="s1">music</span><span class="s2">.</span><span class="s1">load</span><span class="s2">(</span><span class="s1">output_audio_file</span><span class="s2">)</span>
+    <span class="s1">mixer</span><span class="s2">.</span><span class="s1">music</span><span class="s2">.</span><span class="s1">play</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">wikipedia_request</span><span class="s2">(</span><span class="s1">url</span><span class="s2">, </span><span class="s1">wikipediaSearchTerm</span><span class="s2">):</span>
+    <span class="s1">response </span><span class="s2">= </span><span class="s1">requests</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">url</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">response</span><span class="s2">.</span><span class="s1">status_code </span><span class="s2">== </span><span class="s5">200</span><span class="s2">:</span>
+        <span class="s1">page_content </span><span class="s2">= </span><span class="s1">response</span><span class="s2">.</span><span class="s1">content</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">relevant_page </span><span class="s2">= </span><span class="s1">search_relevant_wikipedia_page</span><span class="s2">(</span><span class="s1">wikipediaSearchTerm</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">relevant_page </span><span class="s2">!= </span><span class="s0">None</span><span class="s2">:</span>
+            <span class="s1">url </span><span class="s2">= </span><span class="s4">&quot;https://en.wikipedia.org/wiki/&quot; </span><span class="s2">+ </span><span class="s1">relevant_page</span>
+            <span class="s1">response </span><span class="s2">= </span><span class="s1">requests</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">url</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">response</span><span class="s2">.</span><span class="s1">status_code </span><span class="s2">== </span><span class="s5">200</span><span class="s2">:</span>
+                <span class="s1">page_content </span><span class="s2">= </span><span class="s1">response</span><span class="s2">.</span><span class="s1">content</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">page_content </span><span class="s2">= </span><span class="s0">None</span>
+    <span class="s0">return </span><span class="s1">page_content</span>
+
+<span class="s0">def </span><span class="s1">wikipedia_text_gather</span><span class="s2">(</span><span class="s1">wikipediaSearchTerms</span><span class="s2">):</span>
+    <span class="s0">for </span><span class="s1">wikipediaSearchTerm </span><span class="s0">in </span><span class="s1">wikipediaSearchTerms</span><span class="s2">:</span>
+        <span class="s3"># Step 1: Define the URL of the Wikipedia page</span>
+        <span class="s1">url </span><span class="s2">= </span><span class="s4">&quot;https://en.wikipedia.org/wiki/&quot; </span><span class="s2">+ </span><span class="s1">wikipediaSearchTerm</span>
+        <span class="s1">pageContent </span><span class="s2">= </span><span class="s1">wikipedia_request</span><span class="s2">(</span><span class="s1">url</span><span class="s2">, </span><span class="s1">wikipediaSearchTerm</span><span class="s2">)</span>
+
+        <span class="s3"># Step 3: Parse the HTML content using BeautifulSoup</span>
+        <span class="s0">if </span><span class="s1">pageContent</span><span class="s2">:</span>
+            <span class="s1">soup </span><span class="s2">= </span><span class="s1">BeautifulSoup</span><span class="s2">(</span><span class="s1">pageContent</span><span class="s2">, </span><span class="s4">'html.parser'</span><span class="s2">)</span>
+            <span class="s1">gathered_text </span><span class="s2">= </span><span class="s4">&quot;&quot;</span>
+            <span class="s0">for </span><span class="s1">paragraph </span><span class="s0">in </span><span class="s1">soup</span><span class="s2">.</span><span class="s1">find_all</span><span class="s2">([</span><span class="s4">'p'</span><span class="s2">]):</span>
+                <span class="s1">gathered_text </span><span class="s2">= </span><span class="s1">gathered_text </span><span class="s2">+ </span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">&quot; </span><span class="s2">+ </span><span class="s1">paragraph</span><span class="s2">.</span><span class="s1">get_text</span><span class="s2">(</span><span class="s1">strip</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+        <span class="s3"># write to a txt file the gathered_text which is a variable containing text</span>
+        <span class="s1">write_wiki_text_to_file</span><span class="s2">(</span><span class="s1">wikipediaSearchTerm</span><span class="s2">, </span><span class="s1">gathered_text</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">write_wiki_text_to_file</span><span class="s2">(</span><span class="s1">wikipediaSearchTerm</span><span class="s2">, </span><span class="s1">gathered_text</span><span class="s2">):</span>
+    <span class="s1">file_name </span><span class="s2">= </span><span class="s1">wikipediaSearchTerm </span><span class="s2">+ </span><span class="s4">&quot;.txt&quot;</span>
+
+    <span class="s3"># Open the file in write mode and write the gathered text to it</span>
+    <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">file_name</span><span class="s2">, </span><span class="s4">'w'</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">'utf-8'</span><span class="s2">) </span><span class="s0">as </span><span class="s1">file</span><span class="s2">:  </span><span class="s3"># 'w' mode overwrites the file if it exists</span>
+        <span class="s1">file</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s1">gathered_text</span><span class="s2">)</span>
+
+    <span class="s1">print</span><span class="s2">(</span><span class="s4">f&quot;Text successfully written to </span><span class="s0">{</span><span class="s1">file_name</span><span class="s0">}</span><span class="s4">.&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">search_relevant_wikipedia_page</span><span class="s2">(</span><span class="s1">search_query</span><span class="s2">):</span>
+    <span class="s3"># Use Wikipedia API to search for the most relevant page</span>
+    <span class="s1">search_url </span><span class="s2">= </span><span class="s4">&quot;https://en.wikipedia.org/w/api.php&quot;</span>
+    <span class="s1">params </span><span class="s2">= {</span>
+        <span class="s4">&quot;action&quot;</span><span class="s2">: </span><span class="s4">&quot;query&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;list&quot;</span><span class="s2">: </span><span class="s4">&quot;search&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;srsearch&quot;</span><span class="s2">: </span><span class="s1">search_query</span><span class="s2">,</span>
+        <span class="s4">&quot;format&quot;</span><span class="s2">: </span><span class="s4">&quot;json&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;utf8&quot;</span><span class="s2">: </span><span class="s5">1</span>
+    <span class="s2">}</span>
+
+    <span class="s1">response </span><span class="s2">= </span><span class="s1">requests</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">search_url</span><span class="s2">, </span><span class="s1">params</span><span class="s2">=</span><span class="s1">params</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">response</span><span class="s2">.</span><span class="s1">status_code </span><span class="s2">== </span><span class="s5">200</span><span class="s2">:</span>
+        <span class="s1">search_results </span><span class="s2">= </span><span class="s1">response</span><span class="s2">.</span><span class="s1">json</span><span class="s2">()</span>
+        <span class="s0">if </span><span class="s1">search_results</span><span class="s2">[</span><span class="s4">&quot;query&quot;</span><span class="s2">][</span><span class="s4">&quot;search&quot;</span><span class="s2">]:</span>
+            <span class="s3"># Get the title of the first search result</span>
+            <span class="s1">relevant_title </span><span class="s2">= </span><span class="s1">search_results</span><span class="s2">[</span><span class="s4">&quot;query&quot;</span><span class="s2">][</span><span class="s4">&quot;search&quot;</span><span class="s2">][</span><span class="s5">0</span><span class="s2">][</span><span class="s4">&quot;title&quot;</span><span class="s2">]</span>
+            <span class="s1">print</span><span class="s2">(</span><span class="s4">f&quot;Most relevant page found: </span><span class="s0">{</span><span class="s1">relevant_title</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+            <span class="s3"># Fetch the content of the most relevant page</span>
+            <span class="s0">return </span><span class="s1">relevant_title</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;No relevant page found.&quot;</span><span class="s2">)</span>
+            <span class="s0">return None</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">print</span><span class="s2">(</span><span class="s4">f&quot;Failed to search for relevant page. Status code: </span><span class="s0">{</span><span class="s1">response</span><span class="s2">.</span><span class="s1">status_code</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+        <span class="s0">return None</span>
+
+
+<span class="s0">def </span><span class="s1">open_wiki_txt_file</span><span class="s2">(</span><span class="s1">file_path</span><span class="s2">, </span><span class="s1">iteration</span><span class="s2">, </span><span class="s1">chunk_size </span><span class="s2">= </span><span class="s5">100</span><span class="s2">):</span>
+    <span class="s3"># Open the file</span>
+    <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">file_path</span><span class="s2">, </span><span class="s4">'r'</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">'utf-8'</span><span class="s2">) </span><span class="s0">as </span><span class="s1">file</span><span class="s2">:</span>
+        <span class="s1">content </span><span class="s2">= </span><span class="s1">file</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()  </span><span class="s3"># Read the content of the file</span>
+    <span class="s1">words </span><span class="s2">= </span><span class="s1">content</span><span class="s2">.</span><span class="s1">split</span><span class="s2">()  </span><span class="s3"># Split the text into words</span>
+    <span class="s1">completeText </span><span class="s2">= </span><span class="s4">&quot;&quot;</span>
+    <span class="s3"># Create chunks of the specified size and concatenate to chunks_text</span>
+    <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">0</span><span class="s2">, </span><span class="s1">len</span><span class="s2">(</span><span class="s1">words</span><span class="s2">), </span><span class="s1">chunk_size</span><span class="s2">):</span>
+        <span class="s1">chunk </span><span class="s2">= </span><span class="s4">' '</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">words</span><span class="s2">[</span><span class="s1">i</span><span class="s2">:</span><span class="s1">i </span><span class="s2">+ </span><span class="s1">chunk_size</span><span class="s2">])</span>
+        <span class="s1">completeText </span><span class="s2">+=  </span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">&quot; </span><span class="s2">+ </span><span class="s1">paraphrase</span><span class="s2">(</span><span class="s1">chunk</span><span class="s2">)</span>
+    <span class="s1">write_wiki_text_to_file</span><span class="s2">(</span><span class="s4">&quot;paraphrase&quot;</span><span class="s2">+</span><span class="s1">str</span><span class="s2">(</span><span class="s1">iteration</span><span class="s2">), </span><span class="s1">completeText</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">load_multiple_datasets</span><span class="s2">(</span><span class="s1">directory</span><span class="s2">, </span><span class="s1">tokenizer</span><span class="s2">, </span><span class="s1">block_size</span><span class="s2">=</span><span class="s5">128</span><span class="s2">):</span>
+    <span class="s3"># Combine all text files in the specified directory</span>
+    <span class="s1">combined_text </span><span class="s2">= []</span>
+
+    <span class="s0">for </span><span class="s1">filename </span><span class="s0">in </span><span class="s1">os</span><span class="s2">.</span><span class="s1">listdir</span><span class="s2">(</span><span class="s1">directory</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">filename</span><span class="s2">.</span><span class="s1">endswith</span><span class="s2">(</span><span class="s4">&quot;.txt&quot;</span><span class="s2">):</span>
+            <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">directory</span><span class="s2">, </span><span class="s1">filename</span><span class="s2">), </span><span class="s4">'r'</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">'utf-8'</span><span class="s2">) </span><span class="s0">as </span><span class="s1">file</span><span class="s2">:</span>
+                <span class="s3"># Read and clean each line, removing empty lines</span>
+                <span class="s0">for </span><span class="s1">line </span><span class="s0">in </span><span class="s1">file</span><span class="s2">:</span>
+                    <span class="s1">cleaned_line </span><span class="s2">= </span><span class="s1">line</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()</span>
+                    <span class="s0">if </span><span class="s1">cleaned_line</span><span class="s2">:  </span><span class="s3"># Only add non-empty lines</span>
+                        <span class="s1">combined_text</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">cleaned_line</span><span class="s2">)</span>
+
+    <span class="s3"># Join the cleaned lines into a single string with newlines in between</span>
+    <span class="s1">combined_text </span><span class="s2">= </span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">combined_text</span><span class="s2">)</span>
+
+    <span class="s3"># Save combined text to a temporary file</span>
+    <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s4">&quot;combined_data.txt&quot;</span><span class="s2">, </span><span class="s4">'w'</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">'utf-8'</span><span class="s2">) </span><span class="s0">as </span><span class="s1">temp_file</span><span class="s2">:</span>
+        <span class="s1">temp_file</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s1">combined_text</span><span class="s2">)</span>
+
+    <span class="s3"># Load the combined dataset</span>
+    <span class="s0">return </span><span class="s1">TextDataset</span><span class="s2">(</span>
+        <span class="s1">tokenizer</span><span class="s2">=</span><span class="s1">tokenizer</span><span class="s2">,</span>
+        <span class="s1">file_path</span><span class="s2">=</span><span class="s4">&quot;combined_data.txt&quot;</span><span class="s2">,</span>
+        <span class="s1">block_size</span><span class="s2">=</span><span class="s1">block_size  </span><span class="s3"># Use the provided block size</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">if </span><span class="s1">__name__ </span><span class="s2">== </span><span class="s4">&quot;__main__&quot;</span><span class="s2">:</span>
+
+    <span class="s1">directory_path </span><span class="s2">= </span><span class="s4">'D:/PycharmProjects/pythonProjectTesting/Prompts/'</span>
+    <span class="s1">wikipediaSearchTerms </span><span class="s2">= [</span><span class="s4">'Artificial_Intelligence'</span><span class="s2">,</span><span class="s4">'Machine_Learning'</span><span class="s2">,</span><span class="s4">'Supervised_Learning'</span><span class="s2">, </span><span class="s4">'Unsupervised_Learning'</span><span class="s2">, </span><span class="s4">'Semi-Supervised_Learning'</span><span class="s2">, </span><span class="s4">'Neural_Networks'</span><span class="s2">, </span><span class="s4">'Reccurent_Neural_Networks'</span><span class="s2">, </span><span class="s4">'Convolutional_Neural_Networks'</span><span class="s2">, </span><span class="s4">'Decision_Trees'</span><span class="s2">, </span><span class="s4">'Clustering_Algorithms'</span><span class="s2">, </span><span class="s4">'Support_Vector_Machines'</span><span class="s2">,</span><span class="s4">'Principal_Component_Analysis'</span><span class="s2">, </span><span class="s4">'Back_Propagation'</span><span class="s2">, </span><span class="s4">'Natural_Language_Processing'</span><span class="s2">, </span><span class="s4">'Large_Language_Models'</span><span class="s2">, </span><span class="s4">'Attention_Mechanism'</span><span class="s2">, </span><span class="s4">'Fine_Tuning'</span><span class="s2">, </span><span class="s4">'Object_Detection'</span><span class="s2">, </span><span class="s4">'Object_Segmentation'</span><span class="s2">, </span><span class="s4">'Image_Classification'</span><span class="s2">, </span><span class="s4">'Depth_Estimation'</span><span class="s2">, </span><span class="s4">'Reinforcement_Learning'</span><span class="s2">, </span><span class="s4">'Normal_Distribution'</span><span class="s2">, </span><span class="s4">'Gabor_Filters'</span><span class="s2">, </span><span class="s4">'t-test'</span><span class="s2">,</span><span class="s4">'ANOVA'</span><span class="s2">, </span><span class="s4">'Linear_Regression'</span><span class="s2">, </span><span class="s4">'Logistic_Regression'</span><span class="s2">, </span><span class="s4">'Random_Forest'</span><span class="s2">, </span><span class="s4">'Support_Vector_Machines'</span><span class="s2">]</span>
+    <span class="s1">directory </span><span class="s2">= </span><span class="s4">'D:/PycharmProjects/pythonProjectTesting/Wiki_Info/'</span>
+    <span class="s1">pretrained_model_path </span><span class="s2">= </span><span class="s4">&quot;D:/PycharmProjects/pythonProjectTesting/fine_tuned_model2&quot;</span>
+    <span class="s1">pretrained_tokenizer_path </span><span class="s2">= </span><span class="s4">&quot;D:/PycharmProjects/pythonProjectTesting/fine_tuned_model_tokenizer2&quot;</span>
+
+    <span class="s3"># Prepare training data</span>
+    <span class="s1">sentences</span><span class="s2">, </span><span class="s1">labels </span><span class="s2">= </span><span class="s1">prepare_training_data</span><span class="s2">(</span><span class="s1">directory_path</span><span class="s2">)</span>
+
+    <span class="s3"># # Gather Text from Wikipedia if We haven't already</span>
+    <span class="s0">if not </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">directory</span><span class="s2">):</span>
+        <span class="s1">wikipedia_text_gather</span><span class="s2">(</span><span class="s1">wikipediaSearchTerms</span><span class="s2">)</span>
+
+        <span class="s3"># Specify the path to your file</span>
+        <span class="s1">iteration </span><span class="s2">= </span><span class="s5">0</span>
+        <span class="s0">for </span><span class="s1">filename </span><span class="s0">in </span><span class="s1">os</span><span class="s2">.</span><span class="s1">listdir</span><span class="s2">(</span><span class="s1">directory</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">filename</span><span class="s2">.</span><span class="s1">endswith</span><span class="s2">(</span><span class="s4">'.txt'</span><span class="s2">):  </span><span class="s3"># Process only .txt files</span>
+                <span class="s1">file_path </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">directory</span><span class="s2">, </span><span class="s1">filename</span><span class="s2">)</span>
+                <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">4</span><span class="s2">):</span>
+                    <span class="s1">iteration </span><span class="s2">+= </span><span class="s5">1</span>
+                    <span class="s1">open_wiki_txt_file</span><span class="s2">(</span><span class="s1">file_path</span><span class="s2">, </span><span class="s1">iteration</span><span class="s2">)</span>
+
+
+    <span class="s0">if not </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">pretrained_model_path</span><span class="s2">) </span><span class="s0">or not </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">pretrained_tokenizer_path</span><span class="s2">):</span>
+        <span class="s3"># Fine-tune GPT-2</span>
+        <span class="s1">dataset </span><span class="s2">= </span><span class="s1">load_multiple_datasets</span><span class="s2">(</span><span class="s1">directory</span><span class="s2">, </span><span class="s1">tokenizer_gpt</span><span class="s2">)</span>
+        <span class="s1">data </span><span class="s2">= </span><span class="s1">CustomDataset</span><span class="s2">(</span><span class="s1">tokenizer_gpt</span><span class="s2">,</span><span class="s4">&quot;combined_data.txt&quot;</span><span class="s2">, </span><span class="s5">128</span><span class="s2">)</span>
+        <span class="s1">data_collator </span><span class="s2">= </span><span class="s1">DataCollatorWithPadding</span><span class="s2">(</span><span class="s1">tokenizer</span><span class="s2">=</span><span class="s1">tokenizer_gpt</span><span class="s2">)</span>
+        <span class="s1">training_args </span><span class="s2">= </span><span class="s1">TrainingArguments</span><span class="s2">(</span>
+            <span class="s1">per_device_train_batch_size</span><span class="s2">=</span><span class="s5">2</span><span class="s2">,</span>
+            <span class="s1">num_train_epochs</span><span class="s2">=</span><span class="s5">3</span><span class="s2">,</span>
+            <span class="s1">output_dir</span><span class="s2">=</span><span class="s4">&quot;./results&quot;</span><span class="s2">,</span>
+            <span class="s1">logging_dir</span><span class="s2">=</span><span class="s4">'./logs'</span><span class="s2">,</span>
+            <span class="s1">logging_steps</span><span class="s2">=</span><span class="s5">10</span><span class="s2">,</span>
+            <span class="s1">load_best_model_at_end</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+            <span class="s1">eval_strategy</span><span class="s2">=</span><span class="s4">&quot;no&quot;</span><span class="s2">,</span>
+            <span class="s1">remove_unused_columns</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+            <span class="s1">overwrite_output_dir</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+            <span class="s1">push_to_hub</span><span class="s2">=</span><span class="s0">False</span>
+        <span class="s2">)</span>
+        <span class="s1">trainer </span><span class="s2">= </span><span class="s1">Trainer</span><span class="s2">(</span>
+            <span class="s1">model</span><span class="s2">=</span><span class="s1">model_gpt</span><span class="s2">,</span>
+            <span class="s1">args</span><span class="s2">=</span><span class="s1">training_args</span><span class="s2">,</span>
+            <span class="s1">data_collator</span><span class="s2">=</span><span class="s1">data_collator</span><span class="s2">,</span>
+            <span class="s1">train_dataset</span><span class="s2">=</span><span class="s1">data</span>
+        <span class="s2">)</span>
+
+        <span class="s1">trainer</span><span class="s2">.</span><span class="s1">train</span><span class="s2">()</span>
+        <span class="s3">#</span>
+        <span class="s1">model_gpt</span><span class="s2">.</span><span class="s1">save_pretrained</span><span class="s2">(</span><span class="s4">&quot;./fine_tuned_model2&quot;</span><span class="s2">)</span>
+        <span class="s1">tokenizer_gpt</span><span class="s2">.</span><span class="s1">save_pretrained</span><span class="s2">(</span><span class="s4">&quot;./fine_tuned_model_tokenizer2&quot;</span><span class="s2">)</span>
+
+    <span class="s3"># Load Pretrained gpt2 model</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">model_gpt </span><span class="s2">= </span><span class="s1">GPT2LMHeadModel</span><span class="s2">.</span><span class="s1">from_pretrained</span><span class="s2">(</span><span class="s4">&quot;./fine_tuned_model2&quot;</span><span class="s2">)</span>
+        <span class="s1">tokenizer_gpt </span><span class="s2">= </span><span class="s1">GPT2Tokenizer</span><span class="s2">.</span><span class="s1">from_pretrained</span><span class="s2">(</span><span class="s4">&quot;./fine_tuned_model_tokenizer2&quot;</span><span class="s2">)</span>
+
+    <span class="s1">input_text </span><span class="s2">= </span><span class="s4">&quot;&quot;</span>
+    <span class="s1">mp3AudioCount </span><span class="s2">= </span><span class="s5">0</span>
+    <span class="s0">while </span><span class="s1">input_text </span><span class="s2">!= </span><span class="s4">&quot;exit&quot;</span><span class="s2">:</span>
+        <span class="s1">input_text </span><span class="s2">= </span><span class="s1">input</span><span class="s2">(</span><span class="s4">&quot;Write your prompt&quot;</span><span class="s2">)</span>
+        <span class="s1">input_ids </span><span class="s2">= </span><span class="s1">tokenizer_gpt</span><span class="s2">(</span><span class="s1">input_text</span><span class="s2">, </span><span class="s1">return_tensors</span><span class="s2">=</span><span class="s4">'pt'</span><span class="s2">).</span><span class="s1">input_ids</span>
+        <span class="s1">attention_mask </span><span class="s2">= </span><span class="s1">tokenizer_gpt</span><span class="s2">(</span><span class="s1">input_text</span><span class="s2">, </span><span class="s1">return_tensors </span><span class="s2">= </span><span class="s4">'pt'</span><span class="s2">).</span><span class="s1">attention_mask</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">model_gpt</span><span class="s2">.</span><span class="s1">generate</span><span class="s2">(</span>
+            <span class="s1">input_ids</span><span class="s2">=</span><span class="s1">input_ids</span><span class="s2">,</span>
+            <span class="s1">attention_mask</span><span class="s2">=</span><span class="s1">attention_mask</span><span class="s2">,</span>
+            <span class="s1">max_length</span><span class="s2">=</span><span class="s5">400</span><span class="s2">,</span>
+            <span class="s1">temperature</span><span class="s2">=</span><span class="s5">1.5</span><span class="s2">,</span>
+            <span class="s1">top_k</span><span class="s2">=</span><span class="s5">50</span><span class="s2">,</span>
+            <span class="s1">do_sample</span><span class="s2">=</span><span class="s0">True</span>
+        <span class="s2">)</span>
+        <span class="s1">response </span><span class="s2">= </span><span class="s1">tokenizer_gpt</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">output</span><span class="s2">[</span><span class="s5">0</span><span class="s2">], </span><span class="s1">skip_special_tokens</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s1">print</span><span class="s2">(</span><span class="s1">response</span><span class="s2">)</span>
+        <span class="s1">text_to_audio</span><span class="s2">(</span><span class="s1">response</span><span class="s2">, </span><span class="s4">'test' </span><span class="s2">+ </span><span class="s1">str</span><span class="s2">(</span><span class="s1">mp3AudioCount</span><span class="s2">) + </span><span class="s4">'.mp3'</span><span class="s2">, </span><span class="s1">mp3AudioCount</span><span class="s2">)</span>
+        <span class="s1">mp3AudioCount</span><span class="s2">+=</span><span class="s5">1</span>
+
+        <span class="s3"># # Create a model pipeline</span>
+        <span class="s3"># model = make_pipeline(CountVectorizer(), MultinomialNB())</span>
+        <span class="s3">#</span>
+        <span class="s3"># # Train the model</span>
+        <span class="s3"># model.fit(sentences, labels)</span>
+        <span class="s3">#</span>
+        <span class="s3"># while True:</span>
+        <span class="s3">#     user_input = input(&quot;Enter a sentence to classify: &quot;)</span>
+        <span class="s3">#</span>
+        <span class="s3">#     # Lemmatize the user input before prediction</span>
+        <span class="s3">#     lemmatized_input = ' '.join([lemmatizer.lemmatize(word) for word in nltk.word_tokenize(user_input)])</span>
+        <span class="s3">#</span>
+        <span class="s3">#     prediction = model.predict([lemmatized_input])</span>
+        <span class="s3">#     response = classify_prompt(prediction[0])</span>
+        <span class="s3">#     print(f&quot;The predicted class is: {response}&quot;)</span>
+        <span class="s3">#</span>
+        <span class="s3">#     # Get the response and paraphrase it</span>
+        <span class="s3">#     if response:  # Check if response is valid</span>
+        <span class="s3">#         original_text = choose_text(response)</span>
+        <span class="s3">#         paraphrased_text = paraphrase(original_text)</span>
+        <span class="s3">#         print(&quot;Paraphrased Response:&quot;, paraphrased_text)</span>
+        <span class="s3">#        # text_to_audio(paraphrased_text, 'test.mp3')</span>
+</pre>
+</body>
+</html>
